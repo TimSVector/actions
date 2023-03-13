@@ -1,0 +1,57 @@
+name: C/C++ CI
+
+on:
+  push:
+    branches: [ "master" ]
+  pull_request:
+    branches: [ "master" ]
+    
+  env:
+    VC_Manage_Project="Project"
+    VC_Job_Count=1
+    VC_useCBT="--incremental"
+    VCAST_USE_CI_LICENSES=0
+    
+    
+jobs:
+  build:
+
+    runs-on: ubuntu-latest
+    
+    defaults:
+      run:
+        working-directory: [working-directory]
+        
+    steps:
+    - uses: actions/checkout@v3
+    
+    # Use for serial build/execute
+    - name: VectorCAST Build/Execute
+      run: ${VECTORCAST_DIR}/vpython vc_scripts/github_actions.py ${VC_Manage_Project} --execute --metrics ${VC_useCBT}
+      
+    # Use for parallel build/execute
+    # - name: VectorCAST Parallel Build/Execute
+    #   run: ${VECTORCAST_DIR}/vpython vc_scripts/parallel_build_execute.py --project ${VC_Manage_Project} --jobs ${VC_Job_Count} ${VC_useCBT}
+      
+    # Use for only generating Junit and Cobertura metrics
+    # - name: VectorCAST Generate Metrics
+    #   run: ${VECTORCAST_DIR}/vpython vc_scripts/github_actions.py ${VC_Manage_Project} --metrics
+      
+    # Cobertura reporting
+    - name: Publish Cobertura Report
+      uses: 5monkeys/cobertura-action@master
+      with:
+          path: '**/xml_data/coverage_results*.xml'
+          minimum_coverage: 0  
+          
+    # Junit reporting
+    - name: Publish Test Report
+      uses: mikepenz/action-junit-report@v3
+      if: success() || failure() # always run even if the previous step fails
+      with:
+        report_paths: '**/xml_data/test_results*.xml'
+        detailed_summary: true
+        fail_on_failure: true
+        include_passed: true
+        
+      
