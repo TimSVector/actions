@@ -30,12 +30,12 @@ jobs:
       run: ${VECTORCAST_DIR}/vpython vc_scripts/github_actions.py ${VC_Manage_Project} --execute --metrics ${VC_useCBT}
       
     # Use for parallel build/execute
-    - name: VectorCAST Parallel Build/Execute
-      run: ${VECTORCAST_DIR}/vpython vc_scripts/parallel_build_execute.py --project ${VC_Manage_Project} --jobs ${VC_Job_Count} ${VC_useCBT}
+    # - name: VectorCAST Parallel Build/Execute
+    #   run: ${VECTORCAST_DIR}/vpython vc_scripts/parallel_build_execute.py --project ${VC_Manage_Project} --jobs ${VC_Job_Count} ${VC_useCBT}
       
     # Use for only generating Junit and Cobertura metrics
-    - name: VectorCAST Generate Metrics
-      run: ${VECTORCAST_DIR}/vpython vc_scripts/github_actions.py ${VC_Manage_Project} --metrics
+    # - name: VectorCAST Generate Metrics
+    #   run: ${VECTORCAST_DIR}/vpython vc_scripts/github_actions.py ${VC_Manage_Project} --metrics
       
     # Cobertura reporting
     - name: Publish Cobertura Report
