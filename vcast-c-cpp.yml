@@ -6,22 +6,18 @@ on:
   pull_request:
     branches: [ "master" ]
     
-  env:
-    VC_Manage_Project="Project"
-    VC_Job_Count=1
-    VC_useCBT="--incremental"
-    VCAST_USE_CI_LICENSES=0
-    
+env:
+  VC_Manage_Project="Project"
+  VC_Job_Count=1
+  VC_useCBT="--incremental"
+  VCAST_USE_CI_LICENSES=0
+  CI_PROJECT_DIR: ${{ github.workspace }}
     
 jobs:
   build:
 
-    runs-on: ubuntu-latest
-    
-    defaults:
-      run:
-        working-directory: [working-directory]
-        
+    runs-on: self-hosted
+          
     steps:
     - uses: actions/checkout@v3
     

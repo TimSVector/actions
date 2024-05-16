@@ -15,26 +15,41 @@ except ImportError:
         from queue import Queue, Empty  # python 3.x
  
 VCD = os.environ['VECTORCAST_DIR']
-MONITOR_SLEEP=10
+MONITOR_SLEEP=6
 
-VERSION="v0.1"
-VERSION_DATE="2022-11-28"
+VERSION="v0.2"
+VERSION_DATE="2023-10-14"
 
 class ParallelExecute(object):
     def __init__(self):
         self.manageProject = None
+        self.jobs = "1"
+        self.dryrun = False
+        self.tc_order = False
+        self.prioritize = []
+        self.use_ci = ""
+        self.compiler = None
+        self.testsuite = None
+        self.incremental = ""
+        self.verbose = False
+        
+
+
+    def parseParallelExecuteArgs(self):
         parser = argparse.ArgumentParser()        
         # running from manage
         
         parser.add_argument('--project', '-p',     help='VectorCAST Project Project Name')
         parser.add_argument('--compiler','-c',     help='VectorCAST Project Compiler Node', default=None)
         parser.add_argument('--testsuite','-t',     help='VectorCAST Project TestSuite Node', default=None)
-        parser.add_argument('--incremental', help='Using build-execute incremental (CBT)', action="store_true")
-        parser.add_argument('--dryrun',      help='Dry Run without build/execute', action="store_true")
-        parser.add_argument('--verbose',     help='Dry Run without build/execute', action="store_true")
+        parser.add_argument('--incremental', help='Using build-execute incremental (CBT)', action="store_true", default=False)
+        parser.add_argument('--dryrun',      help='Dry Run without build/execute', action="store_true",default=False)
+        parser.add_argument('--verbose',     help='Dry Run without build/execute', action="store_true",default=False)
         parser.add_argument('--jobs', '-j',     help='Number of concurrent jobs (default = 1)', default="1")
         parser.add_argument('--prioritize', '-pr', help='Comma separated list of environments to add to front of the que', default=None)
-        parser.add_argument('--tc_order', '-tc', help='Add environments to que based on # of testcases', action="store_true")
+        parser.add_argument('--tc_order', '-tc', help='Add environments to que based on # of testcases', action="store_true", default=False)
+        parser.add_argument('--use_ci', help='Use continuous integration licenses', action="store_true", default=False)
+        parser.add_argument('--vcast_action', help = 'Choose the VectorCAST Action (default = build-execute)', choices = ['build', 'execute', 'build-execute'], default = 'build-execute')
         args = parser.parse_args()
         
         try:
@@ -43,8 +58,13 @@ class ParallelExecute(object):
             self.manageProject = args.project
 
         self.jobs = args.jobs
+        if self.jobs == "0":
+            self.jobs = "1"
+            
         self.dryrun = args.dryrun
         self.tc_order = args.tc_order
+        
+        self.vcast_action = args.vcast_action
 
         if args.prioritize == None:
             self.priority_list = []
@@ -67,6 +87,11 @@ class ParallelExecute(object):
             self.incremental = "--incremental"
         else:
             self.incremental = ""
+            
+        if args.use_ci:
+            self.use_ci = " --ci "
+        else:
+            self.use_ci = ""
             
         if args.verbose:
             self.verbose = True
@@ -105,8 +130,8 @@ class ParallelExecute(object):
         compiler, testsuite, env = env_in.split()
         level = compiler + "/" + testsuite
         full_name = "/".join([compiler, testsuite, env])
-        exec_cmd = VCD + "/manage --project " + self.manageProject + \
-            " --build-execute " + self.incremental + " --level " + level + \
+        exec_cmd = VCD + "/manage --project " + self.manageProject + self.use_ci + \
+            " --" + self.vcast_action + " " + self.incremental + " --level " + level + \
             " --environment " + env + \
             " --output " + "_".join([compiler, testsuite, env])+ "_rebuild.html"
             
@@ -176,7 +201,8 @@ class ParallelExecute(object):
             t.daemon = True # thread dies with the program
             t.start()
 
-            time.sleep(2)
+            # sleep the main thread to get the newly spawned thread a change to get running
+            time.sleep(.2)
 
         queue.join()
         
@@ -204,7 +230,9 @@ class ParallelExecute(object):
         script_uptime = script_end_time - self.script_start_time
         script_human_uptime = str(timedelta(seconds=int(script_uptime)))
 
-        subprocess.call(VCD + "/manage --project " + self.manageProject + " --full-status")
+        exec_cmd = VCD + "/manage --project " + self.manageProject + self.use_ci + " --full-status"
+        process = subprocess.Popen(exec_cmd, shell=True)
+        process.wait()
 
         print ("\n\nSummary of Parallel Execution")
         print (    "=============================")
@@ -358,10 +386,16 @@ class ParallelExecute(object):
         self.waiting_execution_queue = {}
 
         if self.tc_order:
-            testcase_list = self.get_testcase_list(api.Environment.all())
+            testcase_list_all = self.get_testcase_list(api.Environment.all())
         else:
-            testcase_list = api.Environment.all()
+            testcase_list_all = api.Environment.all()
 
+        testcase_list = []
+        for env in testcase_list_all:
+            if not env.is_active:                
+                continue
+            testcase_list.append(env)
+                
         for env in testcase_list:
             count = int(self.jobs)
             def_list = env.options['enums']['C_DEFINE_LIST'][0]
@@ -394,6 +428,10 @@ class ParallelExecute(object):
                     
                 #waiting_execution_queue[compiler].append(full_name)
                 
+        api.close()
+        
+        if self.verbose:
+            pprint(self.parallel_exec_info)
 
         for entry in self.parallel_exec_info:
             count = self.parallel_exec_info[entry][0]
@@ -405,7 +443,7 @@ class ParallelExecute(object):
         self.compiler_exec_queue = Queue()
 
         ## create the directory structure in the manage project before building
-        exec_cmd = VCD + "/manage --project " + self.manageProject + " --status"
+        exec_cmd = VCD + "/manage --project " + self.manageProject + self.use_ci +" --status"
         process = subprocess.Popen(exec_cmd, shell=True)
         process.wait()
 
@@ -423,8 +461,21 @@ class ParallelExecute(object):
         self.monitor_jobs()
         
         self.cleanup()
-        
+
+# API for importing the module into another script
+def parallel_build_execute(in_args):
+    prev_argv = sys.argv
+    try:
+        sys.argv =  ["prevcast_parallel_build_execute.py"] + in_args.split(' ')
+        pe = ParallelExecute()
+        pe.parseParallelExecuteArgs()
+        pe.doit()
+    finally:
+        sys.argv = prev_argv
+
 if __name__ == '__main__':
     print ("VectorCAST parallel_build_execute.py ", VERSION, "  ", VERSION_DATE)
-    ParallelExecute().doit()
+    pe = ParallelExecute()
+    pe.parseParallelExecuteArgs()
+    pe.doit()
 

@@ -36,7 +36,6 @@ import time
 import traceback
 
 from managewait import ManageWait
-from parse_console_for_cbt import ParseConsoleForCBT
 try:
     from vector.apps.ReportBuilder.custom_report import CustomReport
     try:
@@ -45,7 +44,8 @@ try:
         from vector.apps.DataAPI.api import Api as UnitTestApi
 except:
     pass
-    
+from vector.enums import ENVIRONMENT_STATUS_TYPE_T
+
 #global variables
 global verbose
 global print_exc
@@ -55,7 +55,7 @@ wait_time = 30
 wait_loops = 1
 
 verbose = False
-print_exc = False
+print_exc = True
 
 def runManageWithWait(command_line, silent=False):
     global verbose
@@ -106,11 +106,11 @@ def readManageVersion(ManageFile):
     return version
 
 # Call manage to get the mapping of Envs to Directory etc.
-def getManageEnvs(FullManageProjectName):
+def getManageEnvs(FullManageProjectName, use_ci = ""):
     manageEnvs = {}
 
     cmd_prefix = os.environ.get('VECTORCAST_DIR') + os.sep
-    callStr = cmd_prefix + "manage --project " + FullManageProjectName + " --build-directory-name"
+    callStr = cmd_prefix + "manage --project " + FullManageProjectName + use_ci + " --build-directory-name"
     out_mgt = runManageWithWait(callStr, silent=True)
     if verbose:
         print(out_mgt)
@@ -153,9 +153,12 @@ def delete_file(filename):
     if os.path.exists(filename):
         os.remove(filename)
         
-def genDataApiReports(FullManageProjectName, entry, cbtDict):
-    xml_file = ""
+def genDataApiReports(FullManageProjectName, entry, use_ci, xml_data_dir):
+
+    global print_exc
     
+    xml_file = ""
+
     try:
         from generate_xml import GenerateXml
 
@@ -166,8 +169,8 @@ def genDataApiReports(FullManageProjectName, entry, cbtDict):
         jobNameDotted = '.'.join([entry["compiler"], entry["testsuite"], entry["env"]])
         jenkins_name = level + "_" + env
         jenkins_link = env + "_" + level
-        xmlUnitReportName = os.getcwd() + os.sep + "xml_data" + os.sep + "test_results_" + level + "_" + env + ".xml"
-        xmlCoverReportName = os.getcwd() + os.sep + "xml_data" + os.sep + "coverage_results_" + level + "_" + env + ".xml"
+        xmlUnitReportName = os.path.join(xml_data_dir, "junit", "test_results_" + level + "_" + env + ".xml")
+        xmlCoverReportName = os.path.join(xml_data_dir,"cobertura","coverage_results_" + level + "_" + env + ".xml")
 
         xml_file = GenerateXml(FullManageProjectName,
                                entry["build_dir"],
@@ -177,33 +180,45 @@ def genDataApiReports(FullManageProjectName, entry, cbtDict):
                                xmlUnitReportName,
                                jenkins_link,
                                jobNameDotted, 
-                               verbose, 
-                               cbtDict)
-                               
+                               verbose,
+                               use_ci)
+                           
         if xml_file.api != None:
             if verbose:
                 print("  Generate Jenkins testcase report: {}".format(xmlUnitReportName))
             xml_file.generate_unit()
 
-        else:
-            print("   Skipping environment: " + jobNameDotted)
-            
     
     except Exception as e:
         print("ERROR: failed to generate XML reports using vpython and the Data API for ", entry["compiler"] + "_" + entry["testsuite"] + "_" + entry["env"], "in directory", entry["build_dir"])
-        if print_exc:
+        if True:
             traceback.print_exc()
+    
     try:       
-        return xml_file.failed_count
+        failed_count = xml_file.failed_count
+        passed_count = xml_file.passed_count
+        del xml_file 
+        return failed_count, passed_count
     except:
-        return 0
+        traceback.print_exc()
+        return 0, 0
 
 def generateCoverReport(path, env, level ):
 
     from vector.apps.ReportBuilder.custom_report import CustomReport
     from vector.apps.DataAPI.cover_api import CoverApi
 
-    api=CoverApi(path)
+    try:
+        api=CoverApi(path)
+    except: 
+        print("CR:    Skipping environment: "+ env)
+        print("CR:       *" + env + " DataAPI is invalid")
+        return 
+        
+    if api.environment.status != ENVIRONMENT_STATUS_TYPE_T.NORMAL:
+        print("CR:    Skipping environment: "+ env)
+        print("CR:       *" + env + " status is not NORMAL")
+        return
 
     report_name = "html_reports/" + level + "_" + env + ".html"
 
@@ -211,7 +226,7 @@ def generateCoverReport(path, env, level ):
         CustomReport.report_from_api(api, report_type="Demo", formats=["HTML"], output_file=report_name, sections=["CUSTOM_HEADER", "REPORT_TITLE", "TABLE_OF_CONTENTS", "CONFIG_DATA", "METRICS", "MCDC_TABLES",  "AGGREGATE_COVERAGE", "CUSTOM_FOOTER"])
 
     except Exception as e:
-        print("   *Problem generating custom report for " + env + ": ")
+        print("CR:    *Problem generating custom report for " + env + ": ")
         if print_exc:
             traceback.print_exc()
 
@@ -221,13 +236,24 @@ def generateUTReport(path, env, level):
     def _dummy(*args, **kwargs):
         return True
 
-    api=UnitTestApi(path)
+    try:
+        api=UnitTestApi(path)
+    except: 
+        print("UTR:   Skipping environment: "+ env)    
+        print("UTR:       *" + env + "'s DataAPI is invalid")
+        return 
+        
+    if api.environment.status != ENVIRONMENT_STATUS_TYPE_T.NORMAL:
+        print("UTR:    Skipping environment: "+ env)    
+        print("UTR:       *" + env + " status is not NORMAL")
+        return
+        
     report_name = "html_reports/" + level + "_" + env + ".html"
     try:
         api.commit = _dummy
         api.report(report_type="FULL_REPORT", formats=["HTML"], output_file=report_name)
     except Exception as e:
-        print("   *Problem generating custom report for " + env + ".")
+        print("UTR:    *Problem generating custom report for " + env + ".")
         if print_exc:
             traceback.print_exc()
 
@@ -237,7 +263,7 @@ def generateIndividualReports(entry, envName):
     env = entry["env"]
     build_dir = entry["build_dir"]
     level = entry["compiler"] + "_" + entry["testsuite"]
-   
+
     if envName == None or envName == env:
         cov_path = os.path.join(build_dir,env + '.vcp')
         unit_path = os.path.join(build_dir,env + '.vce')
@@ -246,31 +272,42 @@ def generateIndividualReports(entry, envName):
             generateCoverReport(cov_path, env, level)
 
         elif os.path.exists(unit_path):
-            generateUTReport(unit_path , env, level)                
+            generateUTReport(unit_path , env, level)
 
-def useNewAPI(FullManageProjectName, manageEnvs, level, envName, cbtDict):
+
+def useNewAPI(FullManageProjectName, manageEnvs, level, envName, use_ci, xml_data_dir = "xml_data"):
     failed_count = 0 
-        
+    passed_count = 0 
+
     for currentEnv in manageEnvs:
+
         if envName == None:
-            failed_count += genDataApiReports(FullManageProjectName, manageEnvs[currentEnv],  cbtDict)
+            fc, pc = genDataApiReports(FullManageProjectName, manageEnvs[currentEnv], use_ci, xml_data_dir)
+            failed_count += fc
+            passed_count += pc
+            
             generateIndividualReports(manageEnvs[currentEnv], envName)
             
         elif manageEnvs[currentEnv]["env"].upper() == envName.upper(): 
             env_level = manageEnvs[currentEnv]["compiler"] + "/" + manageEnvs[currentEnv]["testsuite"]
             
             if env_level.upper() == level.upper():
-                failed_count += genDataApiReports(FullManageProjectName, manageEnvs[currentEnv], cbtDict)
+                fc, pc = genDataApiReports(FullManageProjectName, manageEnvs[currentEnv], use_ci, xml_data_dir)
+                failed_count += fc
+                passed_count += pc
                 generateIndividualReports(manageEnvs[currentEnv], envName)
+        
     f = open("unit_test_fail_count.txt","w")
     f.write(str(failed_count))
     f.close()
+    
+    return failed_count, passed_count
 
 
 # build the Test Case Management Report for Manage Project
 # envName and level only supplied when doing reports for a sub-project
 # of a multi-job
-def buildReports(FullManageProjectName = None, level = None, envName = None, generate_individual_reports = True, timing = False, cbtDict = None):
+def buildReports(FullManageProjectName = None, level = None, envName = None, generate_individual_reports = True, timing = False, use_ci = "", xml_data_dir = "xml_data"):
 
     if timing:
         print("Start: " + str(time.time()))
@@ -293,7 +330,7 @@ def buildReports(FullManageProjectName = None, level = None, envName = None, gen
         print("Version Check: " + str(time.time()))
 
     # cleaning up old builds
-    for path in ["xml_data","html_reports"]:
+    for path in [os.path.join(xml_data_dir,"junit"),"html_reports"]:
         # if the path exists, try to delete it
         if os.path.isdir(path):
             try:
@@ -311,7 +348,7 @@ def buildReports(FullManageProjectName = None, level = None, envName = None, gen
         # we should either have an empty directory or no directory
         if not os.path.isdir(path):
             try:
-                os.mkdir(path)
+                os.makedirs(path)
             except:
                 print("Error creating directory: " + path)
             
@@ -326,6 +363,9 @@ def buildReports(FullManageProjectName = None, level = None, envName = None, gen
     
     
     ### Using new data API - 2019 and beyond
+    
+    failed_count = 0
+    passed_count = 0
     if timing:
         print("Cleanup: " + str(time.time()))
     if useNewReport:
@@ -334,11 +374,13 @@ def buildReports(FullManageProjectName = None, level = None, envName = None, gen
             shutil.rmtree("execution") 
         except:
             pass
-        manageEnvs = getManageEnvs(FullManageProjectName)
+        manageEnvs = getManageEnvs(FullManageProjectName, use_ci)
         if timing:
             print("Using DataAPI for reporting")
             print("Get Info: " + str(time.time()))
-        useNewAPI(FullManageProjectName, manageEnvs, level, envName, cbtDict)
+        fc, pc = useNewAPI(FullManageProjectName, manageEnvs, level, envName, use_ci = use_ci, xml_data_dir=xml_data_dir)
+        failed_count += fc
+        passed_count += pc
         if timing:
             print("XML and Individual reports: " + str(time.time()))
 
@@ -353,6 +395,8 @@ def buildReports(FullManageProjectName = None, level = None, envName = None, gen
 
     if timing:
         print("Complete: " + str(time.time()))
+        
+    return failed_count, passed_count
         
 if __name__ == '__main__':
 
@@ -369,8 +413,8 @@ if __name__ == '__main__':
     parser.add_argument('--cobertura',   help='Output coverage resutls in Cobertura format', action="store_true", default=False)
     parser.add_argument('--api',   help='Unused', type=int)
     parser.add_argument('--final',   help='Write Final JUnit Test Results file',  action="store_true")
-    parser.add_argument('--buildlog',   help='Build Log for CBT Statitics')
     parser.add_argument('--gitlab',   help='Generate Cobertura in a format GitLab can use', action="store_true", default=False)
+    parser.add_argument('--ci',                help='Use continuous integration licenses', action="store_true", default=False)
 
     args = parser.parse_args()
     
@@ -406,24 +450,21 @@ if __name__ == '__main__':
         print ("Test results reporting has been migrated to JUnit.  If you are using older xUnit plugin with Single Jobs, please switch to using JUnit.  If you need assistance with that, contact support@us.vector.com")
         junit = True
         
-    if args.buildlog and os.path.exists(args.buildlog):
-        buildLogData = open(args.buildlog,"r").readlines()
-        cbt = ParseConsoleForCBT(verbose)
-        cbtDict = cbt.parse(buildLogData)
-        
-    else:
-        cbtDict = None
-
-
     # Used for pre VC19
     os.environ['VCAST_RPTS_PRETTY_PRINT_HTML'] = 'FALSE'
     # Used for VC19 SP2 onwards
     os.environ['VCAST_RPTS_SELF_CONTAINED'] = 'FALSE'
+    
+    if args.ci:
+        os.environ['VCAST_USE_CI_LICENSES'] = '1'
+        use_ci = " --ci "
+    else:
+        use_ci = ""
 
-    buildReports(args.ManageProject,args.level,args.environment,dont_generate_individual_reports, timing, cbtDict)
+    failed_count, passed_count = buildReports(args.ManageProject,args.level,args.environment,dont_generate_individual_reports, timing, use_ci)
 
     if args.cobertura:
-        for file in glob.glob("xml_data/coverage_results_*.*"):
+        for file in glob.glob(os.path.join(xml_data_dir,"cobertura","coverage_results_*.*")):
             try:
                 os.remove(file);
             except:
@@ -432,4 +473,4 @@ if __name__ == '__main__':
         cobertura.gitlab = args.gitlab
         cobertura.generateCoverageResults(args.ManageProject)
         
-        
+    sys.exit(failed_count)    
