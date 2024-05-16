@@ -1,24 +1,24 @@
-# vectorcast_gitlab
+# vectorcast_github_actions
 
-Integration between VectorCAST and GitLab
+Integration between VectorCAST and GitHub Action
 
        
 # Summary
 
 This integration allows the user to execute
-[VectorCAST](http://vector.com/vectorcast) Projects in GitLab
+[VectorCAST](http://vector.com/vectorcast) Projects in GitHub
 
 Results can be published in the following formats
-* Coverage results to **_GitLab_** and **_SonarQube_**: **_Cobertura_** (xml_data/cobertura)
+* Coverage results to **_GitHub Action_** and **_SonarQube_**: **_Cobertura_** (xml_data/cobertura)
 * Test Results
-    * To **_GitLab_**: **_JUnit_** (xml_data/junit)
+    * To **_GitHub Action_**: **_JUnit_** (xml_data/junit)
     * To **_SonarQube_**: **_CppUnit_** (xml_data/sonarqube) 
 
 :warning: Due to the limiations of Cobertura plugin, only Statement and Branch results are reported
 
-Two YAML CI files are provided:
+A YAML CI files are provided:
 
-- linux/windows_execute.gitlab-ci.yml - Parallel/Serial build-execute of a VectorCAST Project with options of result output format 
+- vcast-c-cpp.yml - Parallel/Serial build-execute of a VectorCAST Project with options of result output format 
 
 # Calling Action
 
@@ -100,7 +100,7 @@ The api for vcast_exec.py follows:
 
 # Change log
 5/2024
-* Merged in changes from gitlab/azure integration
+* Merged in changes from gitlab/azure integration to GitHub Action
 
     * Added flag to fail job if unit tests fail (or above a certain percent)
     * Added flag to process PC-lint Plus XML data into JSON format for GitLab codequality
